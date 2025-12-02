@@ -2,6 +2,7 @@ const express = require('express');
 const User = require('../models/User');
 const Mechanic = require('../models/Mechanic');
 const Request = require('../models/Request');
+const Payment = require('../models/Payment');
 const Promotion = require('../models/Promotion');
 const Subscription = require('../models/Subscription');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
@@ -889,7 +890,7 @@ router.get('/analytics/requests', async (req, res) => {
     
     const { start, end } = getDateRange(period, startDate, endDate);
     
-    // Build match query
+    // Build base match query for createdAt window
     const matchQuery = {
       createdAt: { $gte: start, $lte: end }
     };
@@ -897,6 +898,31 @@ router.get('/analytics/requests', async (req, res) => {
     if (vehicleType) matchQuery.vehicleType = vehicleType;
     if (problemType) matchQuery.problemType = problemType;
     if (mechanicId) matchQuery.mechanicId = new mongoose.Types.ObjectId(mechanicId);
+
+    // ===== DEBUG LOGS =====
+    // Help diagnose why admin analytics might show zeros even when data exists
+    const [
+      totalInWindow,
+      completedInWindowByStatus,
+      completedInWindowByTimeline,
+      totalCompletedAllTime
+    ] = await Promise.all([
+      Request.countDocuments({ createdAt: { $gte: start, $lte: end } }),
+      Request.countDocuments({ createdAt: { $gte: start, $lte: end }, status: 'completed' }),
+      Request.countDocuments({ 'timeline.completedAt': { $gte: start, $lte: end }, status: 'completed' }),
+      Request.countDocuments({ status: 'completed' })
+    ]);
+
+    console.log('🧮 [ADMIN ANALYTICS][REQUESTS] Debug snapshot:', {
+      period,
+      start,
+      end,
+      filters: { vehicleType, problemType, mechanicId },
+      totalInWindow,
+      completedInWindowByStatus,
+      completedInWindowByTimeline,
+      totalCompletedAllTime
+    });
 
     // Daily requests aggregation
     const dailyRequests = await Request.aggregate([
@@ -981,8 +1007,17 @@ router.get('/analytics/requests', async (req, res) => {
     const prevCompleted = previousPeriod[0]?.completed || 0;
     const currCompleted = currentPeriod[0]?.completed || 0;
 
-    const requestsGrowth = prevTotal > 0 ? ((currTotal - prevTotal) / prevTotal * 100) : 0;
-    const completedGrowth = prevCompleted > 0 ? ((currCompleted - prevCompleted) / prevCompleted * 100) : 0;
+    // If there was no previous period data but there is current data,
+    // treat this as 100% growth instead of 0 to avoid misleading flat stats.
+    const requestsGrowth =
+      prevTotal === 0
+        ? (currTotal > 0 ? 100 : 0)
+        : ((currTotal - prevTotal) / prevTotal * 100);
+
+    const completedGrowth =
+      prevCompleted === 0
+        ? (currCompleted > 0 ? 100 : 0)
+        : ((currCompleted - prevCompleted) / prevCompleted * 100);
 
     res.json({
       success: true,
@@ -1019,9 +1054,11 @@ router.get('/analytics/revenue', async (req, res) => {
     
     const { start, end } = getDateRange(period, startDate, endDate);
     
-    // Build match query for completed requests only
+    // Build match query for completed requests only.
+    // Use completion time for revenue timelines so "Last 30 Days"
+    // reflects when jobs were actually completed, not just created.
     const matchQuery = {
-      createdAt: { $gte: start, $lte: end },
+      'timeline.completedAt': { $gte: start, $lte: end },
       status: 'completed'
     };
     
@@ -1029,13 +1066,37 @@ router.get('/analytics/revenue', async (req, res) => {
     if (problemType) matchQuery.problemType = problemType;
     if (mechanicId) matchQuery.mechanicId = new mongoose.Types.ObjectId(mechanicId);
 
+    // ===== DEBUG LOGS =====
+    const [
+      completedWithCostInWindow,
+      paymentsInWindow,
+      totalPaymentAmountInWindow
+    ] = await Promise.all([
+      Request.countDocuments({ 'timeline.completedAt': { $gte: start, $lte: end }, status: 'completed', actualCost: { $gt: 0 } }),
+      Payment.countDocuments({ createdAt: { $gte: start, $lte: end } }),
+      Payment.aggregate([
+        { $match: { createdAt: { $gte: start, $lte: end } } },
+        { $group: { _id: null, totalAmount: { $sum: '$amount' } } }
+      ])
+    ]);
+
+    console.log('🧮 [ADMIN ANALYTICS][REVENUE] Debug snapshot:', {
+      period,
+      start,
+      end,
+      filters: { vehicleType, problemType, mechanicId },
+      completedWithCostInWindow,
+      paymentsInWindow,
+      totalPaymentAmountInWindow: totalPaymentAmountInWindow[0]?.totalAmount || 0
+    });
+
     // Daily revenue aggregation
     const dailyRevenue = await Request.aggregate([
       { $match: matchQuery },
       {
         $group: {
           _id: {
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$timeline.completedAt' } }
           },
           revenue: { $sum: '$actualCost' },
           count: { $sum: 1 },
@@ -1090,7 +1151,7 @@ router.get('/analytics/revenue', async (req, res) => {
     const previousPeriodRevenue = await Request.aggregate([
       { 
         $match: {
-          createdAt: { 
+          'timeline.completedAt': { 
             $gte: new Date(start.getTime() - (end.getTime() - start.getTime())), 
             $lt: start 
           },
@@ -1108,7 +1169,10 @@ router.get('/analytics/revenue', async (req, res) => {
 
     const currentRevenue = totalRevenue[0]?.totalRevenue || 0;
     const previousRevenue = previousPeriodRevenue[0]?.totalRevenue || 0;
-    const revenueGrowth = previousRevenue > 0 ? ((currentRevenue - previousRevenue) / previousRevenue * 100) : 0;
+    const revenueGrowth =
+      previousRevenue === 0
+        ? (currentRevenue > 0 ? 100 : 0)
+        : ((currentRevenue - previousRevenue) / previousRevenue * 100);
 
     res.json({
       success: true,

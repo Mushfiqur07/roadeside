@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { 
+import {
   Users, 
   Settings, 
   BarChart3, 
@@ -41,27 +41,14 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import AdminMechanicManagement from './AdminMechanicManagement';
 import AdminAnalytics from './AdminAnalytics';
 import toast from 'react-hot-toast';
-// Admin API helper
-import axios from 'axios';
+// Use shared API client so REACT_APP_API_URL is respected
+import api from '../../api';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Tooltip, Legend, Filler);
 
-// Axios instance with auth header from localStorage
-const api = axios.create();
-api.interceptors.request.use((config) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  } catch {}
-  return config;
-});
-
 const adminAPI = {
   async getDashboardStats() {
-    const { data } = await api.get('/api/admin/dashboard');
+    const { data } = await api.get('/admin/dashboard');
     if (!data.success) throw new Error(data.message || 'Failed to get dashboard');
     const { overview } = data.data;
     return {
@@ -81,14 +68,14 @@ const adminAPI = {
     };
   },
   async getActivity() {
-    const { data } = await api.get('/api/admin/activity');
+    const { data } = await api.get('/admin/activity');
     if (!data.success) throw new Error(data.message || 'Failed to get activity');
     return data.data;
   },
   async getUsers(page = 1, limit = 10, filters = {}) {
     const { role, isActive, search } = filters;
     const params = { page, limit, role, isActive, search };
-    const { data } = await api.get('/api/admin/users', { params });
+    const { data } = await api.get('/admin/users', { params });
     if (!data.success) throw new Error(data.message || 'Failed to get users');
     return {
       success: true,
@@ -100,18 +87,18 @@ const adminAPI = {
     };
   },
   async updateUserStatus(userId, isActive) {
-    const { data } = await api.put(`/api/admin/users/${userId}/status`, { isActive });
+    const { data } = await api.put(`/admin/users/${userId}/status`, { isActive });
     if (!data.success) throw new Error(data.message || 'Failed to update user');
     return data.data.user;
   },
   async deleteUser(userId) {
-    const { data } = await api.delete(`/api/admin/users/${userId}`);
+    const { data } = await api.delete(`/admin/users/${userId}`);
     if (!data.success) throw new Error(data.message || 'Failed to delete user');
     return data.data.user;
   },
   async getMechanics(page = 1, limit = 10, filters = {}) {
     const params = { page, limit, ...filters };
-    const { data } = await api.get('/api/admin/mechanics', { params });
+    const { data } = await api.get('/admin/mechanics', { params });
     if (!data.success) throw new Error(data.message || 'Failed to get mechanics');
     return {
       success: true,
@@ -123,13 +110,13 @@ const adminAPI = {
     };
   },
   async setMechanicVerification(mechanicId, verificationStatus, notes) {
-    const { data } = await api.put(`/api/admin/mechanics/${mechanicId}/verification`, { verificationStatus, notes });
+    const { data } = await api.put(`/admin/mechanics/${mechanicId}/verification`, { verificationStatus, notes });
     if (!data.success) throw new Error(data.message || 'Failed to update verification');
     return data.data.mechanic;
   },
   async getRequests(page = 1, limit = 10, filters = {}) {
     const params = { page, limit, ...filters };
-    const { data } = await api.get('/api/admin/requests', { params });
+    const { data } = await api.get('/admin/requests', { params });
     if (!data.success) throw new Error(data.message || 'Failed to get requests');
     return {
       success: true,
@@ -141,32 +128,32 @@ const adminAPI = {
     };
   },
   async updateRequestStatus(requestId, status) {
-    const { data } = await api.put(`/api/admin/requests/${requestId}/status`, { status });
+    const { data } = await api.put(`/admin/requests/${requestId}/status`, { status });
     if (!data.success) throw new Error(data.message || 'Failed to update request');
     return data.data.request;
   },
   async getAnalytics(period = '30d') {
-    const { data } = await api.get('/api/admin/analytics', { params: { period } });
+    const { data } = await api.get('/admin/analytics', { params: { period } });
     if (!data.success) throw new Error(data.message || 'Failed to get analytics');
     return data.data;
   },
   async listPromotions() {
-    const { data } = await api.get('/api/admin/promotions');
+    const { data } = await api.get('/admin/promotions');
     if (!data.success) throw new Error(data.message || 'Failed to get promotions');
     return data.data.promotions;
   },
   async createPromotion(payload) {
-    const { data } = await api.post('/api/admin/promotions', payload);
+    const { data } = await api.post('/admin/promotions', payload);
     if (!data.success) throw new Error(data.message || 'Failed to create promotion');
     return data.data.promotion;
   },
   async updatePromotion(id, payload) {
-    const { data } = await api.put(`/api/admin/promotions/${id}`, payload);
+    const { data } = await api.put(`/admin/promotions/${id}`, payload);
     if (!data.success) throw new Error(data.message || 'Failed to update promotion');
     return data.data.promotion;
   },
   async deletePromotion(id) {
-    const { data } = await api.delete(`/api/admin/promotions/${id}`);
+    const { data } = await api.delete(`/admin/promotions/${id}`);
     if (!data.success) throw new Error(data.message || 'Failed to delete promotion');
     return true;
   }

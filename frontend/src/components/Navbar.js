@@ -1,25 +1,21 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useSocket } from '../context/SocketContext';
 import { 
   Menu, 
   X, 
   User, 
-  LogOut, 
-  MapPin, 
-  History, 
+  LogOut,
+  MapPin,
+  History,
   Wrench,
   Shield,
-  Wifi,
-  WifiOff,
   CreditCard
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const Navbar = () => {
   const { user, isAuthenticated, logout, getUserInitials } = useAuth();
-  const { isConnected } = useSocket();
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -116,17 +112,6 @@ const Navbar = () => {
 
           {/* Right side items */}
           <div className="flex items-center space-x-4">
-            {/* Connection Status */}
-            {isAuthenticated && (
-              <div className="flex items-center">
-                {isConnected ? (
-                  <Wifi className="w-4 h-4 text-green-500" title="Connected" />
-                ) : (
-                  <WifiOff className="w-4 h-4 text-red-500" title="Disconnected" />
-                )}
-              </div>
-            )}
-
             {/* Authentication Section */}
             {isAuthenticated ? (
               <div className="relative">

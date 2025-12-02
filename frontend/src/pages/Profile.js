@@ -325,14 +325,6 @@ const Profile = () => {
               ) : (
                 <div className="space-y-4">
                   <div className="flex items-center space-x-3">
-                    <User className="w-5 h-5 text-gray-400" />
-                    <div>
-                      <p className="text-sm text-gray-500">Full Name</p>
-                      <p className="font-medium">{user.name}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-3">
                     <Phone className="w-5 h-5 text-gray-400" />
                     <div>
                       <p className="text-sm text-gray-500">Phone Number</p>

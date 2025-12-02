@@ -95,6 +95,10 @@ const authenticateToken = async (req, res, next) => {
 const requireRole = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
+      console.warn('requireRole: missing req.user', {
+        requiredRoles: roles,
+        path: req.originalUrl
+      });
       return res.status(401).json({ 
         message: 'Authentication required',
         success: false 
@@ -102,9 +106,24 @@ const requireRole = (...roles) => {
     }
 
     if (!roles.includes(req.user.role)) {
+      console.warn('requireRole: access denied', {
+        requiredRoles: roles,
+        actualRole: req.user.role,
+        userId: req.user._id,
+        path: req.originalUrl
+      });
       return res.status(403).json({ 
         message: `Access denied. Required role: ${roles.join(' or ')}`,
         success: false 
+      });
+    }
+
+    // Debug happy-path logging for admin checks
+    if (roles.includes('admin')) {
+      console.log('requireRole: admin access granted', {
+        userId: req.user._id,
+        role: req.user.role,
+        path: req.originalUrl
       });
     }
 

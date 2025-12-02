@@ -22,6 +22,7 @@ import { mechanicsAPI } from '../../api/mechanics';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
 import { useSocket } from '../../context/SocketContext';
+import api from '../../api';
 
 const MechanicProfilePage = () => {
   const { user, updateUser } = useAuth();
@@ -112,28 +113,24 @@ const MechanicProfilePage = () => {
   const loadMechanicData = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/mechanic/profile', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
 
-      if (response.ok) {
-        const data = await response.json();
-        setMechanicData(data.data.mechanic);
+      // Use shared API client so REACT_APP_API_URL is respected
+      const profileRes = await mechanicsAPI.getMyProfile();
+      const mechanic = profileRes?.data?.mechanic;
+
+      if (mechanic) {
+        setMechanicData(mechanic);
+
         try {
-          // Load reviews for this mechanic
-          const res = await fetch(`/api/mechanics/${data.data.mechanic._id}/reviews`);
-          if (res.ok) {
-            const d = await res.json();
-            setReviews(d?.data?.reviews || []);
-          }
-        } catch {}
+          // Load reviews for this mechanic using the configured API base URL
+          const reviewsRes = await api.get(`/mechanics/${mechanic._id}/reviews`);
+          setReviews(reviewsRes.data?.data?.reviews || []);
+        } catch (e) {
+          console.error('Error loading mechanic reviews:', e);
+        }
         
         // Populate form with current data
-        if (data.data.mechanic) {
-          const mechanic = data.data.mechanic;
+        try {
           setValue('vehicleTypes', mechanic.vehicleTypes || []);
           setValue('skills', mechanic.skills || []);
           setValue('experience', mechanic.experience || 0);
@@ -160,6 +157,8 @@ const MechanicProfilePage = () => {
           setValue('emergencyContact.name', mechanic.emergencyContact?.name || '');
           setValue('emergencyContact.phone', mechanic.emergencyContact?.phone || '');
           setValue('emergencyContact.relation', mechanic.emergencyContact?.relation || '');
+        } catch (e) {
+          console.error('Error populating mechanic form data:', e);
         }
       }
     } catch (error) {
@@ -183,26 +182,19 @@ const MechanicProfilePage = () => {
   const onSubmit = async (data) => {
     try {
       setIsSaving(true);
-      const token = localStorage.getItem('token');
       
-      const response = await fetch('/api/mechanics/profile', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(data)
-      });
+      // Use central mechanics API helper so base URL and auth are handled
+      const result = await mechanicsAPI.updateProfile(data);
+      const updatedMechanic = result?.data?.mechanic || result?.mechanic || null;
 
-      if (response.ok) {
-        const result = await response.json();
-        setMechanicData(result.data.mechanic);
-        setIsEditing(false);
+      if (updatedMechanic) {
+        setMechanicData(updatedMechanic);
         toast.success('Profile updated successfully');
       } else {
-        const error = await response.json();
-        toast.error(error.message || 'Failed to update profile');
+        toast.success('Profile update submitted');
       }
+
+      setIsEditing(false);
     } catch (error) {
       console.error('Error updating profile:', error);
       toast.error('Failed to update profile');

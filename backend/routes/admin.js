@@ -891,7 +891,7 @@ router.get('/analytics/requests', async (req, res) => {
     const { start, end } = getDateRange(period, startDate, endDate);
     
     // Build base match query for createdAt window
-    const matchQuery = {
+    let matchQuery = {
       createdAt: { $gte: start, $lte: end }
     };
     
@@ -923,6 +923,18 @@ router.get('/analytics/requests', async (req, res) => {
       completedInWindowByTimeline,
       totalCompletedAllTime
     });
+
+    // If the selected period is empty but we have historical data,
+    // fall back to "all time" so the admin at least sees charts.
+    let effectivePeriodLabel = period;
+    if (!totalInWindow && totalCompletedAllTime > 0) {
+      console.log('ℹ️ [ADMIN ANALYTICS][REQUESTS] No data in selected window, falling back to all-time data.');
+      matchQuery = {};
+      if (vehicleType) matchQuery.vehicleType = vehicleType;
+      if (problemType) matchQuery.problemType = problemType;
+      if (mechanicId) matchQuery.mechanicId = new mongoose.Types.ObjectId(mechanicId);
+      effectivePeriodLabel = 'all_time_fallback';
+    }
 
     // Daily requests aggregation
     const dailyRequests = await Request.aggregate([
@@ -973,56 +985,63 @@ router.get('/analytics/requests', async (req, res) => {
     ]);
 
     // Calculate growth percentages
-    const previousPeriod = await Request.aggregate([
-      { 
-        $match: {
-          createdAt: { 
-            $gte: new Date(start.getTime() - (end.getTime() - start.getTime())), 
-            $lt: start 
+    let requestsGrowth = 0;
+    let completedGrowth = 0;
+    let currTotal = dailyRequests.reduce((sum, d) => sum + (d.total || 0), 0);
+    let currCompleted = dailyRequests.reduce((sum, d) => sum + (d.completed || 0), 0);
+
+    // Only compute growth relative to previous period when we are using
+    // a real time window; for all-time fallback growth is less meaningful.
+    if (effectivePeriodLabel !== 'all_time_fallback') {
+      const previousPeriod = await Request.aggregate([
+        { 
+          $match: {
+            createdAt: { 
+              $gte: new Date(start.getTime() - (end.getTime() - start.getTime())), 
+              $lt: start 
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } }
           }
         }
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } }
+      ]);
+
+      const currentPeriod = await Request.aggregate([
+        { $match: { createdAt: { $gte: start, $lte: end } } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } }
+          }
         }
-      }
-    ]);
+      ]);
 
-    const currentPeriod = await Request.aggregate([
-      { $match: matchQuery },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } }
-        }
-      }
-    ]);
+      const prevTotal = previousPeriod[0]?.total || 0;
+      currTotal = currentPeriod[0]?.total ?? currTotal;
+      const prevCompleted = previousPeriod[0]?.completed || 0;
+      currCompleted = currentPeriod[0]?.completed ?? currCompleted;
 
-    const prevTotal = previousPeriod[0]?.total || 0;
-    const currTotal = currentPeriod[0]?.total || 0;
-    const prevCompleted = previousPeriod[0]?.completed || 0;
-    const currCompleted = currentPeriod[0]?.completed || 0;
+      requestsGrowth =
+        prevTotal === 0
+          ? (currTotal > 0 ? 100 : 0)
+          : ((currTotal - prevTotal) / prevTotal * 100);
 
-    // If there was no previous period data but there is current data,
-    // treat this as 100% growth instead of 0 to avoid misleading flat stats.
-    const requestsGrowth =
-      prevTotal === 0
-        ? (currTotal > 0 ? 100 : 0)
-        : ((currTotal - prevTotal) / prevTotal * 100);
-
-    const completedGrowth =
-      prevCompleted === 0
-        ? (currCompleted > 0 ? 100 : 0)
-        : ((currCompleted - prevCompleted) / prevCompleted * 100);
+      completedGrowth =
+        prevCompleted === 0
+          ? (currCompleted > 0 ? 100 : 0)
+          : ((currCompleted - prevCompleted) / prevCompleted * 100);
+    }
 
     res.json({
       success: true,
       data: {
-        period: { start, end },
+        period: { start, end, label: effectivePeriodLabel },
         overview: {
           totalRequests: currTotal,
           completedRequests: currCompleted,
@@ -1055,7 +1074,7 @@ router.get('/analytics/revenue', async (req, res) => {
     const { start, end } = getDateRange(period, startDate, endDate);
     
     // Build base match for payments within the selected window
-    const paymentMatch = {
+    let paymentMatch = {
       createdAt: { $gte: start, $lte: end }
     };
 
@@ -1085,13 +1104,15 @@ router.get('/analytics/revenue', async (req, res) => {
     // ===== DEBUG LOGS =====
     const [
       paymentsInWindow,
-      totalPaymentAmountInWindow
+      totalPaymentAmountInWindow,
+      totalPaymentsAllTime
     ] = await Promise.all([
       Payment.countDocuments(paymentMatch),
       Payment.aggregate([
         { $match: paymentMatch },
         { $group: { _id: null, totalAmount: { $sum: '$amount' } } }
-      ])
+      ]),
+      Payment.countDocuments({})
     ]);
 
     console.log('🧮 [ADMIN ANALYTICS][REVENUE] Debug snapshot (payments-based):', {
@@ -1100,12 +1121,31 @@ router.get('/analytics/revenue', async (req, res) => {
       end,
       filters: { vehicleType, problemType, mechanicId },
       paymentsInWindow,
-      totalPaymentAmountInWindow: totalPaymentAmountInWindow[0]?.totalAmount || 0
+      totalPaymentAmountInWindow: totalPaymentAmountInWindow[0]?.totalAmount || 0,
+      totalPaymentsAllTime
     });
+
+    // If there are no payments in the selected window but we do have
+    // historical payments, fall back to all-time so the graphs show data.
+    let effectivePeriodLabel = period;
+    if (!paymentsInWindow && totalPaymentsAllTime > 0) {
+      console.log('ℹ️ [ADMIN ANALYTICS][REVENUE] No payments in selected window, falling back to all-time data.');
+      paymentMatch = {};
+      if (mechanicId) paymentMatch.mechanicId = new mongoose.Types.ObjectId(mechanicId);
+    }
 
     // Daily revenue aggregation (by payment date)
     const dailyRevenue = await Payment.aggregate([
-      ...basePipeline,
+      { $match: paymentMatch },
+      {
+        $lookup: {
+          from: 'requests',
+          localField: 'requestId',
+          foreignField: '_id',
+          as: 'request'
+        }
+      },
+      { $unwind: '$request' },
       filterStage,
       {
         $group: {
@@ -1122,7 +1162,16 @@ router.get('/analytics/revenue', async (req, res) => {
 
     // Revenue by vehicle type
     const revenueByVehicleType = await Payment.aggregate([
-      ...basePipeline,
+      { $match: paymentMatch },
+      {
+        $lookup: {
+          from: 'requests',
+          localField: 'requestId',
+          foreignField: '_id',
+          as: 'request'
+        }
+      },
+      { $unwind: '$request' },
       filterStage,
       {
         $group: {
@@ -1137,7 +1186,16 @@ router.get('/analytics/revenue', async (req, res) => {
 
     // Revenue by problem type
     const revenueByProblemType = await Payment.aggregate([
-      ...basePipeline,
+      { $match: paymentMatch },
+      {
+        $lookup: {
+          from: 'requests',
+          localField: 'requestId',
+          foreignField: '_id',
+          as: 'request'
+        }
+      },
+      { $unwind: '$request' },
       filterStage,
       {
         $group: {
@@ -1152,8 +1210,6 @@ router.get('/analytics/revenue', async (req, res) => {
 
     // Total revenue for period
     const totalRevenue = await Payment.aggregate([
-      ...basePipeline,
-      filterStage,
       {
         $group: {
           _id: null,
@@ -1164,37 +1220,42 @@ router.get('/analytics/revenue', async (req, res) => {
       }
     ]);
 
-    // Previous period for growth calculation (payments-based)
-    const previousPaymentMatch = {
-      ...paymentMatch,
-      createdAt: {
-        $gte: new Date(start.getTime() - (end.getTime() - start.getTime())),
-        $lt: start
-      }
-    };
-
-    const previousPeriodRevenue = await Payment.aggregate([
-      { $match: previousPaymentMatch },
-      {
-        $group: {
-          _id: null,
-          totalRevenue: { $sum: '$amount' },
-          totalOrders: { $sum: 1 }
-        }
-      }
-    ]);
-
     const currentRevenue = totalRevenue[0]?.totalRevenue || 0;
-    const previousRevenue = previousPeriodRevenue[0]?.totalRevenue || 0;
-    const revenueGrowth =
-      previousRevenue === 0
-        ? (currentRevenue > 0 ? 100 : 0)
-        : ((currentRevenue - previousRevenue) / previousRevenue * 100);
+    let revenueGrowth = 0;
+
+    // Only compute growth for real time windows; for all-time we just
+    // report the absolute totals.
+    if (effectivePeriodLabel !== 'all_time_fallback') {
+      const previousPaymentMatch = {
+        createdAt: {
+          $gte: new Date(start.getTime() - (end.getTime() - start.getTime())),
+          $lt: start
+        },
+        ...(mechanicId ? { mechanicId: new mongoose.Types.ObjectId(mechanicId) } : {})
+      };
+
+      const previousPeriodRevenue = await Payment.aggregate([
+        { $match: previousPaymentMatch },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$amount' },
+            totalOrders: { $sum: 1 }
+          }
+        }
+      ]);
+
+      const previousRevenue = previousPeriodRevenue[0]?.totalRevenue || 0;
+      revenueGrowth =
+        previousRevenue === 0
+          ? (currentRevenue > 0 ? 100 : 0)
+          : ((currentRevenue - previousRevenue) / previousRevenue * 100);
+    }
 
     res.json({
       success: true,
       data: {
-        period: { start, end },
+        period: { start, end, label: effectivePeriodLabel },
         overview: {
           totalRevenue: currentRevenue,
           totalOrders: totalRevenue[0]?.totalOrders || 0,

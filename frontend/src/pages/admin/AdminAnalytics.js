@@ -33,21 +33,8 @@ import {
 } from 'recharts';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
-import axios from 'axios';
+import api from '../../api'; // Shared API client (uses REACT_APP_API_URL base)
 import { exportToPDF, exportToExcel } from '../../utils/exportUtils';
-
-// Axios instance with auth header
-const api = axios.create();
-api.interceptors.request.use((config) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  } catch {}
-  return config;
-});
 
 const AdminAnalytics = () => {
   const [loading, setLoading] = useState(true);
@@ -99,7 +86,7 @@ const AdminAnalytics = () => {
 
   const loadMechanics = async () => {
     try {
-      const response = await api.get('/api/admin/mechanics', {
+      const response = await api.get('/admin/mechanics', {
         params: { limit: 100, verificationStatus: 'verified' }
       });
       if (response.data.success) {
@@ -124,9 +111,9 @@ const AdminAnalytics = () => {
       };
 
       const [requestsRes, revenueRes, performanceRes] = await Promise.all([
-        api.get('/api/admin/analytics/requests', { params }),
-        api.get('/api/admin/analytics/revenue', { params }),
-        api.get('/api/admin/analytics/performance', { params })
+        api.get('/admin/analytics/requests', { params }),
+        api.get('/admin/analytics/revenue', { params }),
+        api.get('/admin/analytics/performance', { params })
       ]);
 
       setData({

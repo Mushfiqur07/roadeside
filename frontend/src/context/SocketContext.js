@@ -32,10 +32,27 @@ export const SocketProvider = ({ children, onNewRequest, onRequestUpdate, onPaym
 
       console.log('🔌 Initializing Socket.IO connection...');
       console.log('User:', user.name, 'Role:', user.role);
-      console.log('Socket URL:', process.env.REACT_APP_SOCKET_URL || 'http://localhost:5002');
+
+      // Determine Socket.IO URL
+      const envSocketUrl = process.env.REACT_APP_SOCKET_URL;
+      let socketUrl = envSocketUrl;
+
+      if (!envSocketUrl) {
+        if (process.env.NODE_ENV === 'production') {
+          console.error(
+            'REACT_APP_SOCKET_URL is not defined in production. Socket.IO connection will not be initialized.'
+          );
+          return;
+        } else {
+          // In development, fall back to localhost for convenience
+          socketUrl = 'http://localhost:5002';
+        }
+      }
+
+      console.log('Socket URL:', socketUrl);
 
       // Create socket connection - use SOCKET_URL not API_URL
-      const newSocket = io(process.env.REACT_APP_SOCKET_URL || 'http://localhost:5002', {
+      const newSocket = io(socketUrl, {
         auth: {
           token: token
         },

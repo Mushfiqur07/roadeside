@@ -1054,114 +1054,131 @@ router.get('/analytics/revenue', async (req, res) => {
     
     const { start, end } = getDateRange(period, startDate, endDate);
     
-    // Build match query for completed requests only.
-    // Use completion time for revenue timelines so "Last 30 Days"
-    // reflects when jobs were actually completed, not just created.
-    const matchQuery = {
-      'timeline.completedAt': { $gte: start, $lte: end },
-      status: 'completed'
+    // Build base match for payments within the selected window
+    const paymentMatch = {
+      createdAt: { $gte: start, $lte: end }
     };
-    
-    if (vehicleType) matchQuery.vehicleType = vehicleType;
-    if (problemType) matchQuery.problemType = problemType;
-    if (mechanicId) matchQuery.mechanicId = new mongoose.Types.ObjectId(mechanicId);
+
+    if (mechanicId) paymentMatch.mechanicId = new mongoose.Types.ObjectId(mechanicId);
+
+    // Base pipeline: join payments to requests so we can filter on vehicle/problem type
+    const basePipeline = [
+      { $match: paymentMatch },
+      {
+        $lookup: {
+          from: 'requests',
+          localField: 'requestId',
+          foreignField: '_id',
+          as: 'request'
+        }
+      },
+      { $unwind: '$request' }
+    ];
+
+    const filterStage = {
+      $match: {
+        ...(vehicleType ? { 'request.vehicleType': vehicleType } : {}),
+        ...(problemType ? { 'request.problemType': problemType } : {})
+      }
+    };
 
     // ===== DEBUG LOGS =====
     const [
-      completedWithCostInWindow,
       paymentsInWindow,
       totalPaymentAmountInWindow
     ] = await Promise.all([
-      Request.countDocuments({ 'timeline.completedAt': { $gte: start, $lte: end }, status: 'completed', actualCost: { $gt: 0 } }),
-      Payment.countDocuments({ createdAt: { $gte: start, $lte: end } }),
+      Payment.countDocuments(paymentMatch),
       Payment.aggregate([
-        { $match: { createdAt: { $gte: start, $lte: end } } },
+        { $match: paymentMatch },
         { $group: { _id: null, totalAmount: { $sum: '$amount' } } }
       ])
     ]);
 
-    console.log('🧮 [ADMIN ANALYTICS][REVENUE] Debug snapshot:', {
+    console.log('🧮 [ADMIN ANALYTICS][REVENUE] Debug snapshot (payments-based):', {
       period,
       start,
       end,
       filters: { vehicleType, problemType, mechanicId },
-      completedWithCostInWindow,
       paymentsInWindow,
       totalPaymentAmountInWindow: totalPaymentAmountInWindow[0]?.totalAmount || 0
     });
 
-    // Daily revenue aggregation
-    const dailyRevenue = await Request.aggregate([
-      { $match: matchQuery },
+    // Daily revenue aggregation (by payment date)
+    const dailyRevenue = await Payment.aggregate([
+      ...basePipeline,
+      filterStage,
       {
         $group: {
           _id: {
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$timeline.completedAt' } }
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }
           },
-          revenue: { $sum: '$actualCost' },
+          revenue: { $sum: '$amount' },
           count: { $sum: 1 },
-          avgOrderValue: { $avg: '$actualCost' }
+          avgOrderValue: { $avg: '$amount' }
         }
       },
       { $sort: { '_id.date': 1 } }
     ]);
 
     // Revenue by vehicle type
-    const revenueByVehicleType = await Request.aggregate([
-      { $match: matchQuery },
+    const revenueByVehicleType = await Payment.aggregate([
+      ...basePipeline,
+      filterStage,
       {
         $group: {
-          _id: '$vehicleType',
-          revenue: { $sum: '$actualCost' },
+          _id: '$request.vehicleType',
+          revenue: { $sum: '$amount' },
           count: { $sum: 1 },
-          avgOrderValue: { $avg: '$actualCost' }
+          avgOrderValue: { $avg: '$amount' }
         }
       },
       { $sort: { revenue: -1 } }
     ]);
 
     // Revenue by problem type
-    const revenueByProblemType = await Request.aggregate([
-      { $match: matchQuery },
+    const revenueByProblemType = await Payment.aggregate([
+      ...basePipeline,
+      filterStage,
       {
         $group: {
-          _id: '$problemType',
-          revenue: { $sum: '$actualCost' },
+          _id: '$request.problemType',
+          revenue: { $sum: '$amount' },
           count: { $sum: 1 },
-          avgOrderValue: { $avg: '$actualCost' }
+          avgOrderValue: { $avg: '$amount' }
         }
       },
       { $sort: { revenue: -1 } }
     ]);
 
     // Total revenue for period
-    const totalRevenue = await Request.aggregate([
-      { $match: matchQuery },
+    const totalRevenue = await Payment.aggregate([
+      ...basePipeline,
+      filterStage,
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: '$actualCost' },
+          totalRevenue: { $sum: '$amount' },
           totalOrders: { $sum: 1 },
-          avgOrderValue: { $avg: '$actualCost' }
+          avgOrderValue: { $avg: '$amount' }
         }
       }
     ]);
 
-    // Previous period for growth calculation
-    const previousPeriodRevenue = await Request.aggregate([
-      { 
-        $match: {
-          'timeline.completedAt': { 
-            $gte: new Date(start.getTime() - (end.getTime() - start.getTime())), 
-            $lt: start 
-          },
-          status: 'completed'
-        }
-      },
+    // Previous period for growth calculation (payments-based)
+    const previousPaymentMatch = {
+      ...paymentMatch,
+      createdAt: {
+        $gte: new Date(start.getTime() - (end.getTime() - start.getTime())),
+        $lt: start
+      }
+    };
+
+    const previousPeriodRevenue = await Payment.aggregate([
+      { $match: previousPaymentMatch },
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: '$actualCost' },
+          totalRevenue: { $sum: '$amount' },
           totalOrders: { $sum: 1 }
         }
       }

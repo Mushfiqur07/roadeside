@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
+import api from '../../api';
 
 const AdminMechanicManagement = () => {
   const [mechanics, setMechanics] = useState([]);
@@ -35,18 +36,11 @@ const AdminMechanicManagement = () => {
   const loadMechanics = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/admin/mechanics', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
+      const { data } = await api.get('/admin/mechanics');
+      if (data?.success) {
         setMechanics(data.data.mechanics);
       } else {
-        toast.error('Failed to load mechanics');
+        toast.error(data?.message || 'Failed to load mechanics');
       }
     } catch (error) {
       console.error('Error loading mechanics:', error);
@@ -59,23 +53,16 @@ const AdminMechanicManagement = () => {
   const handleStatusUpdate = async (mechanicId, newStatus) => {
     try {
       setIsUpdating(true);
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/admin/mechanics/${mechanicId}/verification`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ verificationStatus: newStatus })
+      const { data } = await api.put(`/admin/mechanics/${mechanicId}/verification`, {
+        verificationStatus: newStatus
       });
 
-      if (response.ok) {
+      if (data?.success) {
         toast.success(`Mechanic ${newStatus} successfully`);
         loadMechanics();
         setShowDetails(false);
       } else {
-        const error = await response.json();
-        toast.error(error.message || 'Failed to update status');
+        toast.error(data?.message || 'Failed to update status');
       }
     } catch (error) {
       console.error('Error updating status:', error);

@@ -21,6 +21,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLocation } from '../context/LocationContext';
 import { requestsAPI } from '../api/requests';
 import { createOrGetChatByRequest } from '../api/chat';
+import api from '../api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ChatWindow from '../components/ChatWindow';
 import toast from 'react-hot-toast';
@@ -60,13 +61,12 @@ const MechanicProfileView = () => {
   const loadMechanicProfile = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/mechanics/${id}/profile`);
-      
-      if (response.ok) {
-        const data = await response.json();
+      const { data } = await api.get(`/mechanics/${id}/profile`);
+
+      if (data?.success) {
         setMechanic(data.data.mechanic);
       } else {
-        toast.error('Failed to load mechanic profile');
+        toast.error(data?.message || 'Failed to load mechanic profile');
         navigate('/find-mechanics');
       }
     } catch (error) {
@@ -81,9 +81,8 @@ const MechanicProfileView = () => {
   const loadReviews = async () => {
     try {
       setIsLoadingReviews(true);
-      const res = await fetch(`/api/mechanics/${id}/reviews`);
-      if (res.ok) {
-        const data = await res.json();
+      const { data } = await api.get(`/mechanics/${id}/reviews`);
+      if (data?.success) {
         setReviews(data?.data?.reviews || []);
       }
     } catch (error) {

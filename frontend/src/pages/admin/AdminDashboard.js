@@ -1469,7 +1469,7 @@ const AdminSettings = () => {
 
   const load = async () => {
     try {
-      const res = await api.get('/api/admin/settings');
+      const res = await api.get('/admin/settings');
       if (res.data?.success) setSettings(res.data.data);
     } catch (e) { console.error(e); }
   };
@@ -1477,7 +1477,7 @@ const AdminSettings = () => {
   const handleSave = async () => {
     try {
       setSaving(true);
-      await api.put('/api/admin/settings', settings);
+      await api.put('/admin/settings', settings);
       toast.success('Settings saved');
     } catch (e) { toast.error('Failed to save'); }
     finally { setSaving(false); }
@@ -1491,7 +1491,7 @@ const AdminSettings = () => {
         if (prev <= 1) {
           clearInterval(timer);
           // Trigger maintenance
-          api.post('/api/admin/maintenance/start', { reason })
+          api.post('/admin/maintenance/start', { reason })
             .then(() => { toast.success('Maintenance enabled'); load(); })
             .catch(() => toast.error('Failed to enable maintenance'))
             .finally(() => setConfirming(false));
@@ -1503,7 +1503,7 @@ const AdminSettings = () => {
 
   const stopMaintenance = async () => {
     try {
-      await api.post('/api/admin/maintenance/stop');
+      await api.post('/admin/maintenance/stop');
       toast.success('Maintenance disabled');
       load();
     } catch (e) { toast.error('Failed to disable maintenance'); }
